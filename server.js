@@ -1,19 +1,32 @@
+require("dotenv").config();
+
 const express = require("express");
 const axios = require("axios");
 const cors = require("cors");
+const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-const PAYSTACK_URL = "https://api.paystack.co";
-const FRONTEND_URL =
-  "https://mercyjohn43210-rgb.github.io/Airtime-App/";
+/* =========================================
+   SUPABASE
+========================================= */
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
 /* =========================================
-   PAYSTACK HEADERS
+   PAYSTACK
 ========================================= */
+
+const PAYSTACK_URL = "https://api.paystack.co";
+
+const FRONTEND_URL =
+  "https://mercyjohn43210-rgb.github.io/Airtime-App/";
 
 function paystackHeaders() {
   return {
@@ -27,7 +40,94 @@ function paystackHeaders() {
 ========================================= */
 
 app.get("/", (req, res) => {
-  res.send("Johnmercy Backend is running");
+  res.json({
+    success: true,
+    message: "Johnmercy Backend is running"
+  });
+});
+
+/* =========================================
+   TEST SUPABASE
+========================================= */
+
+app.get("/test-supabase", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("users")
+      .select("*")
+      .limit(10);
+
+    if (error) {
+      console.error("Supabase error:", error);
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    res.json({
+      success: true,
+      users: data
+    });
+
+  } catch (error) {
+    console.error("Supabase connection error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Supabase connection failed"
+    });
+  }
+});
+
+/* =========================================
+   CREATE USER
+========================================= */
+
+app.post("/users", async (req, res) => {
+  try {
+    const { name } = req.body;
+
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        error: "Name is required"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("users")
+      .insert([
+        {
+          name: name
+        }
+      ])
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Create user error:", error);
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    res.json({
+      success: true,
+      user: data
+    });
+
+  } catch (error) {
+    console.error("User creation error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Could not create user"
+    });
+  }
 });
 
 /* =========================================
@@ -58,7 +158,7 @@ app.post("/initialize-payment", async (req, res) => {
     const response = await axios.post(
       `${PAYSTACK_URL}/transaction/initialize`,
       {
-        email: email,
+        email,
         amount: Math.round(numericAmount * 100),
         currency: "NGN",
         callback_url: FRONTEND_URL
@@ -92,12 +192,6 @@ app.get("/verify-payment/:reference", async (req, res) => {
   try {
     const { reference } = req.params;
 
-    if (!reference) {
-      return res.status(400).json({
-        error: "Payment reference is required"
-      });
-    }
-
     const response = await axios.get(
       `${PAYSTACK_URL}/transaction/verify/${encodeURIComponent(
         reference
@@ -120,15 +214,13 @@ app.get("/verify-payment/:reference", async (req, res) => {
         reference: payment.data.reference,
         amount: payment.data.amount / 100,
         currency: payment.data.currency,
-        email:
-          payment.data.customer?.email || null
+        email: payment.data.customer?.email || null
       });
     }
 
-    return res.json({
+    res.json({
       success: false,
-      message:
-        "Payment has not been completed successfully."
+      message: "Payment has not been completed successfully."
     });
 
   } catch (error) {
@@ -170,12 +262,6 @@ app.post("/initialize-transfer", async (req, res) => {
       });
     }
 
-    /*
-      Paystack requires an expiry time for
-      Pay with Transfer.
-
-      We use 30 minutes from now.
-    */
     const expiresAt = new Date(
       Date.now() + 30 * 60 * 1000
     ).toISOString();
@@ -183,14 +269,9 @@ app.post("/initialize-transfer", async (req, res) => {
     const response = await axios.post(
       `${PAYSTACK_URL}/charge`,
       {
-        email: email,
-
-        amount: Math.round(
-          numericAmount * 100
-        ),
-
+        email,
+        amount: Math.round(numericAmount * 100),
         currency: "NGN",
-
         bank_transfer: {
           account_expires_at: expiresAt
         }
@@ -201,11 +282,6 @@ app.post("/initialize-transfer", async (req, res) => {
     );
 
     const data = response.data;
-
-    /*
-      Return only the information the frontend
-      needs for the transfer screen.
-    */
 
     if (data.status && data.data) {
       return res.json({
@@ -251,7 +327,7 @@ app.post("/initialize-transfer", async (req, res) => {
       });
     }
 
-    return res.status(400).json({
+    res.status(400).json({
       status: false,
       error:
         data.message ||
@@ -285,13 +361,6 @@ app.get(
     try {
       const { reference } = req.params;
 
-      if (!reference) {
-        return res.status(400).json({
-          error:
-            "Transfer reference is required"
-        });
-      }
-
       const response = await axios.get(
         `${PAYSTACK_URL}/transaction/verify/${encodeURIComponent(
           reference
@@ -307,46 +376,34 @@ app.get(
         payment.status &&
         payment.data
       ) {
-        const transaction =
-          payment.data;
+        const transaction = payment.data;
 
-        if (
-          transaction.status ===
-          "success"
-        ) {
+        if (transaction.status === "success") {
           return res.json({
             success: true,
-
             message:
               "Transfer payment verified successfully",
-
             reference:
               transaction.reference,
-
             amount:
               transaction.amount / 100,
-
             currency:
               transaction.currency,
-
             email:
-              transaction.customer
-                ?.email || null
+              transaction.customer?.email || null
           });
         }
 
         return res.json({
           success: false,
-
           status:
             transaction.status,
-
           message:
             "Transfer has not been completed yet."
         });
       }
 
-      return res.json({
+      res.json({
         success: false,
         message:
           "Transfer could not be verified."
@@ -381,18 +438,8 @@ app.post("/paystack-webhook", (req, res) => {
       event.event
     );
 
-    /*
-      For now we acknowledge the webhook.
-
-      IMPORTANT:
-      A production wallet should store successful
-      references in a database and credit the user's
-      server-side wallet exactly once.
-    */
-
     if (
-      event.event ===
-      "charge.success"
+      event.event === "charge.success"
     ) {
       console.log(
         "Successful Paystack transaction:",
@@ -400,7 +447,7 @@ app.post("/paystack-webhook", (req, res) => {
       );
     }
 
-    return res.sendStatus(200);
+    res.sendStatus(200);
 
   } catch (error) {
     console.error(
@@ -408,7 +455,7 @@ app.post("/paystack-webhook", (req, res) => {
       error.message
     );
 
-    return res.sendStatus(200);
+    res.sendStatus(200);
   }
 });
 
