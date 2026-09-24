@@ -83,8 +83,7 @@ function verifyPassword(password, storedHash) {
             Buffer.from(key, "hex");
 
           const match =
-            storedKey.length ===
-              derivedKey.length &&
+            storedKey.length === derivedKey.length &&
             crypto.timingSafeEqual(
               storedKey,
               derivedKey
@@ -228,14 +227,16 @@ app.post("/wallet/create", async (req, res) => {
       });
     }
 
-    const { data: existingWallet, error: findError } =
-      await supabase
-        .from("wallets")
-        .select(
-          "id,email,balance,created_at,updated_at"
-        )
-        .eq("email", email)
-        .maybeSingle();
+    const {
+      data: existingWallet,
+      error: findError
+    } = await supabase
+      .from("wallets")
+      .select(
+        "id,email,balance,created_at,updated_at"
+      )
+      .eq("email", email)
+      .maybeSingle();
 
     if (findError) {
       console.error(
@@ -256,11 +257,14 @@ app.post("/wallet/create", async (req, res) => {
       });
     }
 
-    const { data, error } = await supabase
+    const {
+      data,
+      error
+    } = await supabase
       .from("wallets")
       .insert([
         {
-          email: email,
+          email,
           balance: 0
         }
       ])
@@ -310,11 +314,7 @@ app.post("/users", async (req, res) => {
       password
     } = req.body;
 
-    if (
-      !name ||
-      !email ||
-      !password
-    ) {
+    if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
         error:
@@ -453,10 +453,7 @@ app.post("/login", async (req, res) => {
       password
     } = req.body;
 
-    if (
-      !email ||
-      !password
-    ) {
+    if (!email || !password) {
       return res.status(400).json({
         success: false,
         error:
@@ -560,8 +557,7 @@ app.post("/login", async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        created_at:
-          user.created_at
+        created_at: user.created_at
       },
       wallet: wallet || null
     });
@@ -605,9 +601,7 @@ app.post(
         Number(amount);
 
       if (
-        !Number.isFinite(
-          numericAmount
-        ) ||
+        !Number.isFinite(numericAmount) ||
         numericAmount < 100
       ) {
         return res.status(400).json({
@@ -635,9 +629,7 @@ app.post(
           }
         );
 
-      res.json(
-        response.data
-      );
+      res.json(response.data);
     } catch (error) {
       console.error(
         "Paystack initialization error:",
@@ -647,8 +639,7 @@ app.post(
 
       res.status(500).json({
         error:
-          error.response?.data
-            ?.message ||
+          error.response?.data?.message ||
           "Payment initialization failed"
       });
     }
@@ -657,6 +648,7 @@ app.post(
 
 /* =========================================
    VERIFY CARD PAYMENT
+   AND CREDIT WALLET
 ========================================= */
 
 app.get(
@@ -687,20 +679,195 @@ app.get(
         payment.data.status ===
           "success"
       ) {
+        const transaction =
+          payment.data;
+
+        const paymentReference =
+          transaction.reference;
+
+        const email =
+          transaction.customer?.email
+            ?.trim()
+            .toLowerCase();
+
+        const amount =
+          Number(transaction.amount) /
+          100;
+
+        if (
+          !email ||
+          !paymentReference ||
+          !Number.isFinite(amount) ||
+          amount <= 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              "Invalid payment information"
+          });
+        }
+
+        /* CHECK DUPLICATE PAYMENT */
+
+        const {
+          data: existingTransaction,
+          error:
+            transactionCheckError
+        } = await supabase
+          .from("wallet_transactions")
+          .select("id,reference")
+          .eq(
+            "reference",
+            paymentReference
+          )
+          .maybeSingle();
+
+        if (transactionCheckError) {
+          console.error(
+            "Transaction check error:",
+            transactionCheckError
+          );
+
+          return res.status(500).json({
+            success: false,
+            error:
+              transactionCheckError.message
+          });
+        }
+
+        if (existingTransaction) {
+          return res.json({
+            success: true,
+            alreadyCredited: true,
+            message:
+              "This payment has already been credited.",
+            reference:
+              paymentReference
+          });
+        }
+
+        /* GET WALLET */
+
+        const {
+          data: wallet,
+          error: walletError
+        } = await supabase
+          .from("wallets")
+          .select(
+            "id,email,balance"
+          )
+          .eq(
+            "email",
+            email
+          )
+          .maybeSingle();
+
+        if (walletError) {
+          console.error(
+            "Wallet lookup error:",
+            walletError
+          );
+
+          return res.status(500).json({
+            success: false,
+            error:
+              walletError.message
+          });
+        }
+
+        if (!wallet) {
+          return res.status(404).json({
+            success: false,
+            error:
+              "Wallet not found"
+          });
+        }
+
+        /* ADD MONEY */
+
+        const currentBalance =
+          Number(wallet.balance) ||
+          0;
+
+        const newBalance =
+          currentBalance +
+          amount;
+
+        const {
+          data: updatedWallet,
+          error: updateError
+        } = await supabase
+          .from("wallets")
+          .update({
+            balance:
+              newBalance,
+            updated_at:
+              new Date().toISOString()
+          })
+          .eq(
+            "id",
+            wallet.id
+          )
+          .select(
+            "id,email,balance,created_at,updated_at"
+          )
+          .single();
+
+        if (updateError) {
+          console.error(
+            "Wallet update error:",
+            updateError
+          );
+
+          return res.status(500).json({
+            success: false,
+            error:
+              updateError.message
+          });
+        }
+
+        /* SAVE TRANSACTION */
+
+        const {
+          error:
+            transactionError
+        } = await supabase
+          .from("wallet_transactions")
+          .insert([
+            {
+              reference:
+                paymentReference,
+              email,
+              type: "credit",
+              amount
+            }
+          ]);
+
+        if (transactionError) {
+          console.error(
+            "Transaction save error:",
+            transactionError
+          );
+
+          /*
+             The wallet has already been credited.
+             The unique reference prevents
+             another successful credit later.
+          */
+        }
+
         return res.json({
           success: true,
           message:
-            "Payment verified successfully",
+            "Payment verified and wallet credited.",
           reference:
-            payment.data.reference,
-          amount:
-            payment.data.amount /
-            100,
+            paymentReference,
+          amount,
           currency:
-            payment.data.currency,
-          email:
-            payment.data.customer
-              ?.email || null
+            transaction.currency,
+          email,
+          wallet:
+            updatedWallet
         });
       }
 
@@ -718,8 +885,7 @@ app.get(
 
       res.status(500).json({
         error:
-          error.response?.data
-            ?.message ||
+          error.response?.data?.message ||
           "Payment verification failed"
       });
     }
@@ -753,9 +919,7 @@ app.post(
         Number(amount);
 
       if (
-        !Number.isFinite(
-          numericAmount
-        ) ||
+        !Number.isFinite(numericAmount) ||
         numericAmount < 100
       ) {
         return res.status(400).json({
@@ -807,32 +971,40 @@ app.post(
             reference:
               data.data.reference ||
               null,
+
             status:
               data.data.status ||
               null,
+
             amount:
               data.data.amount
                 ? data.data.amount /
                   100
                 : numericAmount,
+
             currency:
               data.data.currency ||
               "NGN",
+
             display_text:
               data.data.display_text ||
               null,
+
             account_number:
               data.data.bank_transfer
                 ?.account_number ||
               null,
+
             bank_name:
               data.data.bank_transfer
                 ?.bank_name ||
               null,
+
             account_name:
               data.data.bank_transfer
                 ?.account_name ||
               null,
+
             expires_at:
               data.data.bank_transfer
                 ?.account_expires_at ||
@@ -860,8 +1032,7 @@ app.post(
       ).json({
         status: false,
         error:
-          error.response?.data
-            ?.message ||
+          error.response?.data?.message ||
           "Transfer payment initialization failed"
       });
     }
@@ -870,6 +1041,7 @@ app.post(
 
 /* =========================================
    VERIFY BANK TRANSFER
+   AND CREDIT WALLET
 ========================================= */
 
 app.get(
@@ -905,20 +1077,186 @@ app.get(
           transaction.status ===
           "success"
         ) {
+          const paymentReference =
+            transaction.reference;
+
+          const email =
+            transaction.customer?.email
+              ?.trim()
+              .toLowerCase();
+
+          const amount =
+            Number(transaction.amount) /
+            100;
+
+          if (
+            !email ||
+            !paymentReference ||
+            !Number.isFinite(amount) ||
+            amount <= 0
+          ) {
+            return res.status(400).json({
+              success: false,
+              error:
+                "Invalid transfer information"
+            });
+          }
+
+          /* CHECK DUPLICATE */
+
+          const {
+            data: existingTransaction,
+            error:
+              transactionCheckError
+          } = await supabase
+            .from("wallet_transactions")
+            .select("id,reference")
+            .eq(
+              "reference",
+              paymentReference
+            )
+            .maybeSingle();
+
+          if (transactionCheckError) {
+            console.error(
+              "Transfer transaction check error:",
+              transactionCheckError
+            );
+
+            return res.status(500).json({
+              success: false,
+              error:
+                transactionCheckError.message
+            });
+          }
+
+          if (existingTransaction) {
+            return res.json({
+              success: true,
+              alreadyCredited: true,
+              message:
+                "This transfer has already been credited.",
+              reference:
+                paymentReference
+            });
+          }
+
+          /* GET WALLET */
+
+          const {
+            data: wallet,
+            error: walletError
+          } = await supabase
+            .from("wallets")
+            .select(
+              "id,email,balance"
+            )
+            .eq(
+              "email",
+              email
+            )
+            .maybeSingle();
+
+          if (walletError) {
+            console.error(
+              "Transfer wallet lookup error:",
+              walletError
+            );
+
+            return res.status(500).json({
+              success: false,
+              error:
+                walletError.message
+            });
+          }
+
+          if (!wallet) {
+            return res.status(404).json({
+              success: false,
+              error:
+                "Wallet not found"
+            });
+          }
+
+          /* ADD MONEY */
+
+          const currentBalance =
+            Number(wallet.balance) ||
+            0;
+
+          const newBalance =
+            currentBalance +
+            amount;
+
+          const {
+            data: updatedWallet,
+            error: updateError
+          } = await supabase
+            .from("wallets")
+            .update({
+              balance:
+                newBalance,
+              updated_at:
+                new Date().toISOString()
+            })
+            .eq(
+              "id",
+              wallet.id
+            )
+            .select(
+              "id,email,balance,created_at,updated_at"
+            )
+            .single();
+
+          if (updateError) {
+            console.error(
+              "Transfer wallet update error:",
+              updateError
+            );
+
+            return res.status(500).json({
+              success: false,
+              error:
+                updateError.message
+            });
+          }
+
+          /* SAVE TRANSACTION */
+
+          const {
+            error:
+              transactionError
+          } = await supabase
+            .from("wallet_transactions")
+            .insert([
+              {
+                reference:
+                  paymentReference,
+                email,
+                type: "credit",
+                amount
+              }
+            ]);
+
+          if (transactionError) {
+            console.error(
+              "Transfer transaction save error:",
+              transactionError
+            );
+          }
+
           return res.json({
             success: true,
             message:
-              "Transfer payment verified successfully",
+              "Transfer verified and wallet credited.",
             reference:
-              transaction.reference,
-            amount:
-              transaction.amount /
-              100,
+              paymentReference,
+            amount,
             currency:
               transaction.currency,
-            email:
-              transaction.customer
-                ?.email || null
+            email,
+            wallet:
+              updatedWallet
           });
         }
 
@@ -945,8 +1283,7 @@ app.get(
 
       res.status(500).json({
         error:
-          error.response?.data
-            ?.message ||
+          error.response?.data?.message ||
           "Transfer verification failed"
       });
     }
