@@ -1,37 +1,49 @@
 require("dotenv").config();
+
 const express = require("express");
 const axios = require("axios");
 const cors = require("cors");
 const crypto = require("crypto");
 const { createClient } = require("@supabase/supabase-js");
+
 const app = express();
+
 app.use(cors());
 app.use(express.json());
+
 /* =========================================
    SUPABASE
 ========================================= */
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 );
+
 /* =========================================
    PAYSTACK
 ========================================= */
+
 const PAYSTACK_URL = "https://api.paystack.co";
+
 const FRONTEND_URL =
   "https://mercyjohn43210-rgb.github.io/Airtime-App/";
+
 function paystackHeaders() {
   return {
     Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
     "Content-Type": "application/json"
   };
 }
+
 /* =========================================
    PASSWORD HASHING
 ========================================= */
+
 function hashPassword(password) {
   return new Promise((resolve, reject) => {
     const salt = crypto.randomBytes(16).toString("hex");
+
     crypto.scrypt(
       password,
       salt,
@@ -40,6 +52,7 @@ function hashPassword(password) {
         if (error) {
           return reject(error);
         }
+
         resolve(
           `${salt}:${derivedKey.toString("hex")}`
         );
@@ -47,13 +60,16 @@ function hashPassword(password) {
     );
   });
 }
+
 function verifyPassword(password, storedHash) {
   return new Promise((resolve, reject) => {
     try {
       const [salt, key] = storedHash.split(":");
+
       if (!salt || !key) {
         return resolve(false);
       }
+
       crypto.scrypt(
         password,
         salt,
@@ -62,8 +78,10 @@ function verifyPassword(password, storedHash) {
           if (error) {
             return reject(error);
           }
+
           const storedKey =
             Buffer.from(key, "hex");
+
           const match =
             storedKey.length ===
               derivedKey.length &&
@@ -71,6 +89,7 @@ function verifyPassword(password, storedHash) {
               storedKey,
               derivedKey
             );
+
           resolve(match);
         }
       );
@@ -79,34 +98,41 @@ function verifyPassword(password, storedHash) {
     }
   });
 }
+
 /* =========================================
    HOME
 ========================================= */
+
 app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "Johnmercy Backend is running"
   });
 });
+
 /* =========================================
    TEST SUPABASE
 ========================================= */
+
 app.get("/test-supabase", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("users")
       .select("id,name,email,created_at")
       .limit(10);
+
     if (error) {
       console.error(
         "Supabase error:",
         error
       );
+
       return res.status(500).json({
         success: false,
         error: error.message
       });
     }
+
     res.json({
       success: true,
       users: data
@@ -116,16 +142,166 @@ app.get("/test-supabase", async (req, res) => {
       "Supabase connection error:",
       error
     );
+
     res.status(500).json({
       success: false,
-      error:
-        "Supabase connection failed"
+      error: "Supabase connection failed"
     });
   }
 });
+
+/* =========================================
+   GET WALLET
+========================================= */
+
+app.get("/wallet/:email", async (req, res) => {
+  try {
+    const email = String(req.params.email)
+      .trim()
+      .toLowerCase();
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: "Email is required"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("wallets")
+      .select(
+        "id,email,balance,created_at,updated_at"
+      )
+      .eq("email", email)
+      .maybeSingle();
+
+    if (error) {
+      console.error(
+        "Wallet lookup error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        error: "Wallet not found"
+      });
+    }
+
+    res.json({
+      success: true,
+      wallet: data
+    });
+  } catch (error) {
+    console.error(
+      "Wallet error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Could not get wallet"
+    });
+  }
+});
+
+/* =========================================
+   CREATE WALLET
+========================================= */
+
+app.post("/wallet/create", async (req, res) => {
+  try {
+    const email = String(req.body.email || "")
+      .trim()
+      .toLowerCase();
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: "Email is required"
+      });
+    }
+
+    const { data: existingWallet, error: findError } =
+      await supabase
+        .from("wallets")
+        .select(
+          "id,email,balance,created_at,updated_at"
+        )
+        .eq("email", email)
+        .maybeSingle();
+
+    if (findError) {
+      console.error(
+        "Wallet search error:",
+        findError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: findError.message
+      });
+    }
+
+    if (existingWallet) {
+      return res.json({
+        success: true,
+        wallet: existingWallet
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("wallets")
+      .insert([
+        {
+          email: email,
+          balance: 0
+        }
+      ])
+      .select(
+        "id,email,balance,created_at,updated_at"
+      )
+      .single();
+
+    if (error) {
+      console.error(
+        "Wallet creation error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    res.json({
+      success: true,
+      wallet: data
+    });
+  } catch (error) {
+    console.error(
+      "Create wallet error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Could not create wallet"
+    });
+  }
+});
+
 /* =========================================
    SIGN UP
 ========================================= */
+
 app.post("/users", async (req, res) => {
   try {
     const {
@@ -133,6 +309,7 @@ app.post("/users", async (req, res) => {
       email,
       password
     } = req.body;
+
     if (
       !name ||
       !email ||
@@ -144,6 +321,7 @@ app.post("/users", async (req, res) => {
           "Name, email and password are required"
       });
     }
+
     if (password.length < 6) {
       return res.status(400).json({
         success: false,
@@ -151,10 +329,15 @@ app.post("/users", async (req, res) => {
           "Password must be at least 6 characters"
       });
     }
+
     const cleanName =
       String(name).trim();
+
     const cleanEmail =
-      String(email).trim().toLowerCase();
+      String(email)
+        .trim()
+        .toLowerCase();
+
     const {
       data: existingUser,
       error: existingError
@@ -163,17 +346,19 @@ app.post("/users", async (req, res) => {
       .select("id")
       .eq("email", cleanEmail)
       .maybeSingle();
+
     if (existingError) {
       console.error(
         "Existing user check error:",
         existingError
       );
+
       return res.status(500).json({
         success: false,
-        error:
-          existingError.message
+        error: existingError.message
       });
     }
+
     if (existingUser) {
       return res.status(409).json({
         success: false,
@@ -181,8 +366,10 @@ app.post("/users", async (req, res) => {
           "An account with this email already exists."
       });
     }
+
     const passwordHash =
       await hashPassword(password);
+
     const {
       data,
       error
@@ -199,42 +386,73 @@ app.post("/users", async (req, res) => {
         "id,name,email,created_at"
       )
       .single();
+
     if (error) {
       console.error(
         "Create user error:",
         error
       );
+
       return res.status(500).json({
         success: false,
-        error:
-          error.message
+        error: error.message
       });
     }
+
+    /* CREATE USER WALLET */
+
+    const {
+      data: wallet,
+      error: walletError
+    } = await supabase
+      .from("wallets")
+      .insert([
+        {
+          email: cleanEmail,
+          balance: 0
+        }
+      ])
+      .select(
+        "id,email,balance,created_at,updated_at"
+      )
+      .single();
+
+    if (walletError) {
+      console.error(
+        "Wallet creation error after signup:",
+        walletError
+      );
+    }
+
     res.json({
       success: true,
-      user: data
+      user: data,
+      wallet: wallet || null
     });
   } catch (error) {
     console.error(
       "Signup error:",
       error
     );
+
     res.status(500).json({
       success: false,
-      error:
-        "Could not create account"
+      error: "Could not create account"
     });
   }
 });
+
 /* =========================================
    LOGIN
 ========================================= */
+
 app.post("/login", async (req, res) => {
   try {
     const {
       email,
       password
     } = req.body;
+
     if (
       !email ||
       !password
@@ -245,8 +463,12 @@ app.post("/login", async (req, res) => {
           "Email and password are required"
       });
     }
+
     const cleanEmail =
-      String(email).trim().toLowerCase();
+      String(email)
+        .trim()
+        .toLowerCase();
+
     const {
       data: user,
       error
@@ -257,17 +479,19 @@ app.post("/login", async (req, res) => {
       )
       .eq("email", cleanEmail)
       .maybeSingle();
+
     if (error) {
       console.error(
         "Login user lookup error:",
         error
       );
+
       return res.status(500).json({
         success: false,
-        error:
-          error.message
+        error: error.message
       });
     }
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -275,11 +499,13 @@ app.post("/login", async (req, res) => {
           "Invalid email or password."
       });
     }
+
     const valid =
       await verifyPassword(
         password,
         user.password_hash
       );
+
     if (!valid) {
       return res.status(401).json({
         success: false,
@@ -287,6 +513,47 @@ app.post("/login", async (req, res) => {
           "Invalid email or password."
       });
     }
+
+    /* GET USER WALLET */
+
+    let {
+      data: wallet,
+      error: walletError
+    } = await supabase
+      .from("wallets")
+      .select(
+        "id,email,balance,created_at,updated_at"
+      )
+      .eq("email", cleanEmail)
+      .maybeSingle();
+
+    if (walletError) {
+      console.error(
+        "Wallet lookup during login:",
+        walletError
+      );
+    }
+
+    /* CREATE WALLET IF IT DOES NOT EXIST */
+
+    if (!wallet) {
+      const result =
+        await supabase
+          .from("wallets")
+          .insert([
+            {
+              email: cleanEmail,
+              balance: 0
+            }
+          ])
+          .select(
+            "id,email,balance,created_at,updated_at"
+          )
+          .single();
+
+      wallet = result.data;
+    }
+
     res.json({
       success: true,
       user: {
@@ -295,23 +562,26 @@ app.post("/login", async (req, res) => {
         email: user.email,
         created_at:
           user.created_at
-      }
+      },
+      wallet: wallet || null
     });
   } catch (error) {
     console.error(
       "Login error:",
       error
     );
+
     res.status(500).json({
       success: false,
-      error:
-        "Login failed"
+      error: "Login failed"
     });
   }
 });
+
 /* =========================================
    INITIALIZE CARD PAYMENT
 ========================================= */
+
 app.post(
   "/initialize-payment",
   async (req, res) => {
@@ -320,6 +590,7 @@ app.post(
         email,
         amount
       } = req.body;
+
       if (
         !email ||
         amount === undefined
@@ -329,8 +600,10 @@ app.post(
             "Email and amount are required"
         });
       }
+
       const numericAmount =
         Number(amount);
+
       if (
         !Number.isFinite(
           numericAmount
@@ -342,6 +615,7 @@ app.post(
             "Minimum payment amount is ₦100"
         });
       }
+
       const response =
         await axios.post(
           `${PAYSTACK_URL}/transaction/initialize`,
@@ -360,6 +634,7 @@ app.post(
               paystackHeaders()
           }
         );
+
       res.json(
         response.data
       );
@@ -369,6 +644,7 @@ app.post(
         error.response?.data ||
           error.message
       );
+
       res.status(500).json({
         error:
           error.response?.data
@@ -378,9 +654,11 @@ app.post(
     }
   }
 );
+
 /* =========================================
    VERIFY CARD PAYMENT
 ========================================= */
+
 app.get(
   "/verify-payment/:reference",
   async (req, res) => {
@@ -388,6 +666,7 @@ app.get(
       const {
         reference
       } = req.params;
+
       const response =
         await axios.get(
           `${PAYSTACK_URL}/transaction/verify/${encodeURIComponent(
@@ -398,8 +677,10 @@ app.get(
               paystackHeaders()
           }
         );
+
       const payment =
         response.data;
+
       if (
         payment.status &&
         payment.data &&
@@ -422,6 +703,7 @@ app.get(
               ?.email || null
         });
       }
+
       res.json({
         success: false,
         message:
@@ -433,6 +715,7 @@ app.get(
         error.response?.data ||
           error.message
       );
+
       res.status(500).json({
         error:
           error.response?.data
@@ -442,9 +725,11 @@ app.get(
     }
   }
 );
+
 /* =========================================
    INITIALIZE BANK TRANSFER
 ========================================= */
+
 app.post(
   "/initialize-transfer",
   async (req, res) => {
@@ -453,6 +738,7 @@ app.post(
         email,
         amount
       } = req.body;
+
       if (
         !email ||
         amount === undefined
@@ -462,8 +748,10 @@ app.post(
             "Email and amount are required"
         });
       }
+
       const numericAmount =
         Number(amount);
+
       if (
         !Number.isFinite(
           numericAmount
@@ -475,11 +763,13 @@ app.post(
             "Minimum payment amount is ₦100"
         });
       }
+
       const expiresAt =
         new Date(
           Date.now() +
             30 * 60 * 1000
         ).toISOString();
+
       const response =
         await axios.post(
           `${PAYSTACK_URL}/charge`,
@@ -500,8 +790,10 @@ app.post(
               paystackHeaders()
           }
         );
+
       const data =
         response.data;
+
       if (
         data.status &&
         data.data
@@ -548,6 +840,7 @@ app.post(
           }
         });
       }
+
       res.status(400).json({
         status: false,
         error:
@@ -560,6 +853,7 @@ app.post(
         error.response?.data ||
           error.message
       );
+
       res.status(
         error.response?.status ||
           500
@@ -573,9 +867,11 @@ app.post(
     }
   }
 );
+
 /* =========================================
    VERIFY BANK TRANSFER
 ========================================= */
+
 app.get(
   "/verify-transfer/:reference",
   async (req, res) => {
@@ -583,6 +879,7 @@ app.get(
       const {
         reference
       } = req.params;
+
       const response =
         await axios.get(
           `${PAYSTACK_URL}/transaction/verify/${encodeURIComponent(
@@ -593,14 +890,17 @@ app.get(
               paystackHeaders()
           }
         );
+
       const payment =
         response.data;
+
       if (
         payment.status &&
         payment.data
       ) {
         const transaction =
           payment.data;
+
         if (
           transaction.status ===
           "success"
@@ -621,6 +921,7 @@ app.get(
                 ?.email || null
           });
         }
+
         return res.json({
           success: false,
           status:
@@ -629,6 +930,7 @@ app.get(
             "Transfer has not been completed yet."
         });
       }
+
       res.json({
         success: false,
         message:
@@ -640,6 +942,7 @@ app.get(
         error.response?.data ||
           error.message
       );
+
       res.status(500).json({
         error:
           error.response?.data
@@ -649,19 +952,23 @@ app.get(
     }
   }
 );
+
 /* =========================================
    PAYSTACK WEBHOOK
 ========================================= */
+
 app.post(
   "/paystack-webhook",
   (req, res) => {
     try {
       const event =
         req.body;
+
       console.log(
         "Paystack webhook received:",
         event.event
       );
+
       if (
         event.event ===
         "charge.success"
@@ -671,21 +978,26 @@ app.post(
           event.data?.reference
         );
       }
+
       res.sendStatus(200);
     } catch (error) {
       console.error(
         "Webhook error:",
         error.message
       );
+
       res.sendStatus(200);
     }
   }
 );
+
 /* =========================================
    SERVER
 ========================================= */
+
 const PORT =
   process.env.PORT || 3000;
+
 app.listen(
   PORT,
   () => {
