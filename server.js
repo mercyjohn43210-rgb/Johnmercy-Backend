@@ -121,10 +121,7 @@ app.get("/test-supabase", async (req, res) => {
       .limit(10);
 
     if (error) {
-      console.error(
-        "Supabase error:",
-        error
-      );
+      console.error("Supabase error:", error);
 
       return res.status(500).json({
         success: false,
@@ -848,12 +845,6 @@ app.get(
             "Transaction save error:",
             transactionError
           );
-
-          /*
-             The wallet has already been credited.
-             The unique reference prevents
-             another successful credit later.
-          */
         }
 
         return res.json({
@@ -1290,6 +1281,481 @@ app.get(
   }
 );
 
+
+/* =========================================
+   DATA PLANS
+========================================= */
+
+const DATA_PLANS = [
+  /* REGULAR MTN */
+
+  {
+    id: "mtn-100",
+    network: "MTN",
+    category: "regular",
+    name: "MTN 100MB",
+    amount: 100,
+    validity: "1 Day",
+    size: "100MB"
+  },
+
+  {
+    id: "mtn-200",
+    network: "MTN",
+    category: "regular",
+    name: "MTN 250MB",
+    amount: 200,
+    validity: "2 Days",
+    size: "250MB"
+  },
+
+  {
+    id: "mtn-500",
+    network: "MTN",
+    category: "regular",
+    name: "MTN 1GB",
+    amount: 500,
+    validity: "7 Days",
+    size: "1GB"
+  },
+
+
+  /* REGULAR AIRTEL */
+
+  {
+    id: "airtel-100",
+    network: "Airtel",
+    category: "regular",
+    name: "Airtel 100MB",
+    amount: 100,
+    validity: "1 Day",
+    size: "100MB"
+  },
+
+  {
+    id: "airtel-200",
+    network: "Airtel",
+    category: "regular",
+    name: "Airtel 250MB",
+    amount: 200,
+    validity: "2 Days",
+    size: "250MB"
+  },
+
+  {
+    id: "airtel-500",
+    network: "Airtel",
+    category: "regular",
+    name: "Airtel 1GB",
+    amount: 500,
+    validity: "7 Days",
+    size: "1GB"
+  },
+
+
+  /* REGULAR GLO */
+
+  {
+    id: "glo-100",
+    network: "Glo",
+    category: "regular",
+    name: "Glo 100MB",
+    amount: 100,
+    validity: "1 Day",
+    size: "100MB"
+  },
+
+  {
+    id: "glo-200",
+    network: "Glo",
+    category: "regular",
+    name: "Glo 250MB",
+    amount: 200,
+    validity: "2 Days",
+    size: "250MB"
+  },
+
+  {
+    id: "glo-500",
+    network: "Glo",
+    category: "regular",
+    name: "Glo 1GB",
+    amount: 500,
+    validity: "7 Days",
+    size: "1GB"
+  },
+
+
+  /* REGULAR 9MOBILE */
+
+  {
+    id: "9mobile-100",
+    network: "9mobile",
+    category: "regular",
+    name: "9mobile 100MB",
+    amount: 100,
+    validity: "1 Day",
+    size: "100MB"
+  },
+
+  {
+    id: "9mobile-200",
+    network: "9mobile",
+    category: "regular",
+    name: "9mobile 250MB",
+    amount: 200,
+    validity: "2 Days",
+    size: "250MB"
+  },
+
+  {
+    id: "9mobile-500",
+    network: "9mobile",
+    category: "regular",
+    name: "9mobile 1GB",
+    amount: 500,
+    validity: "7 Days",
+    size: "1GB"
+  },
+
+
+  /* =========================================
+     GIFT DATA
+  ========================================= */
+
+  {
+    id: "gift-mtn-100",
+    network: "MTN",
+    category: "gift",
+    name: "MTN Gift 100MB",
+    amount: 100,
+    validity: "1 Day",
+    size: "100MB"
+  },
+
+  {
+    id: "gift-mtn-200",
+    network: "MTN",
+    category: "gift",
+    name: "MTN Gift 250MB",
+    amount: 200,
+    validity: "2 Days",
+    size: "250MB"
+  },
+
+  {
+    id: "gift-mtn-500",
+    network: "MTN",
+    category: "gift",
+    name: "MTN Gift 1GB",
+    amount: 500,
+    validity: "7 Days",
+    size: "1GB"
+  },
+
+
+  /* =========================================
+     CORPORATE DATA
+  ========================================= */
+
+  {
+    id: "corporate-mtn-100",
+    network: "MTN",
+    category: "corporate",
+    name: "MTN Corporate 100MB",
+    amount: 100,
+    validity: "1 Day",
+    size: "100MB"
+  },
+
+  {
+    id: "corporate-mtn-200",
+    network: "MTN",
+    category: "corporate",
+    name: "MTN Corporate 250MB",
+    amount: 200,
+    validity: "2 Days",
+    size: "250MB"
+  },
+
+  {
+    id: "corporate-mtn-500",
+    network: "MTN",
+    category: "corporate",
+    name: "MTN Corporate 1GB",
+    amount: 500,
+    validity: "7 Days",
+    size: "1GB"
+  }
+];
+
+
+/* =========================================
+   GET DATA PLANS
+========================================= */
+
+app.get("/data", (req, res) => {
+  try {
+    const {
+      network,
+      category
+    } = req.query;
+
+    let plans = [...DATA_PLANS];
+
+    if (network) {
+      plans = plans.filter(
+        plan =>
+          plan.network.toLowerCase() ===
+          String(network)
+            .trim()
+            .toLowerCase()
+      );
+    }
+
+    if (category) {
+      plans = plans.filter(
+        plan =>
+          plan.category.toLowerCase() ===
+          String(category)
+            .trim()
+            .toLowerCase()
+      );
+    }
+
+    res.json({
+      success: true,
+      count: plans.length,
+      plans
+    });
+
+  } catch (error) {
+    console.error(
+      "Data plans error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error:
+        "Could not load data plans"
+    });
+  }
+});
+
+
+/* =========================================
+   PURCHASE DATA
+========================================= */
+
+app.post(
+  "/purchase-data",
+  async (req, res) => {
+    try {
+      const {
+        email,
+        phone,
+        planId
+      } = req.body;
+
+      if (
+        !email ||
+        !phone ||
+        !planId
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Email, phone number and plan are required"
+        });
+      }
+
+      const cleanEmail =
+        String(email)
+          .trim()
+          .toLowerCase();
+
+      const cleanPhone =
+        String(phone).trim();
+
+      const plan =
+        DATA_PLANS.find(
+          item =>
+            item.id === planId
+        );
+
+      if (!plan) {
+        return res.status(404).json({
+          success: false,
+          error:
+            "Data plan not found"
+        });
+      }
+
+      /* GET WALLET */
+
+      const {
+        data: wallet,
+        error: walletError
+      } = await supabase
+        .from("wallets")
+        .select(
+          "id,email,balance"
+        )
+        .eq(
+          "email",
+          cleanEmail
+        )
+        .maybeSingle();
+
+      if (walletError) {
+        console.error(
+          "Data wallet lookup error:",
+          walletError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error:
+            walletError.message
+        });
+      }
+
+      if (!wallet) {
+        return res.status(404).json({
+          success: false,
+          error:
+            "Wallet not found"
+        });
+      }
+
+      const balance =
+        Number(wallet.balance) || 0;
+
+      /* CHECK BALANCE */
+
+      if (
+        balance < plan.amount
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Insufficient wallet balance",
+          balance,
+          required:
+            plan.amount
+        });
+      }
+
+      /*
+        IMPORTANT:
+
+        The actual network delivery
+        will be connected to a VTU
+        provider API separately.
+      */
+
+      const newBalance =
+        balance - plan.amount;
+
+      /* DEDUCT WALLET */
+
+      const {
+        data: updatedWallet,
+        error: updateError
+      } = await supabase
+        .from("wallets")
+        .update({
+          balance:
+            newBalance,
+          updated_at:
+            new Date().toISOString()
+        })
+        .eq(
+          "id",
+          wallet.id
+        )
+        .select(
+          "id,email,balance,created_at,updated_at"
+        )
+        .single();
+
+      if (updateError) {
+        console.error(
+          "Data wallet update error:",
+          updateError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error:
+            updateError.message
+        });
+      }
+
+      /* CREATE REFERENCE */
+
+      const reference =
+        `DATA-${Date.now()}-${crypto
+          .randomBytes(4)
+          .toString("hex")}`;
+
+      /* SAVE TRANSACTION */
+
+      const {
+        error:
+          transactionError
+      } = await supabase
+        .from("wallet_transactions")
+        .insert([
+          {
+            reference,
+            email: cleanEmail,
+            type: "debit",
+            amount:
+              plan.amount
+          }
+        ]);
+
+      if (transactionError) {
+        console.error(
+          "Data transaction save error:",
+          transactionError
+        );
+      }
+
+      res.json({
+        success: true,
+        message:
+          "Data purchase processed successfully.",
+        reference,
+        phone:
+          cleanPhone,
+        plan,
+        amount:
+          plan.amount,
+        wallet:
+          updatedWallet,
+        deliveryStatus:
+          "pending_provider"
+      });
+
+    } catch (error) {
+      console.error(
+        "Purchase data error:",
+        error
+      );
+
+      res.status(500).json({
+        success: false,
+        error:
+          "Data purchase failed"
+      });
+    }
+  }
+);
+
+
 /* =========================================
    PAYSTACK WEBHOOK
 ========================================= */
@@ -1317,6 +1783,7 @@ app.post(
       }
 
       res.sendStatus(200);
+
     } catch (error) {
       console.error(
         "Webhook error:",
@@ -1327,6 +1794,7 @@ app.post(
     }
   }
 );
+
 
 /* =========================================
    SERVER
