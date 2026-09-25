@@ -1,128 +1,507 @@
-require("dotenv").config();
+require('dotenv').config();
 
-const express = require("express");
-const axios = require("axios");
-const cors = require("cors");
-const crypto = require("crypto");
-const { createClient } = require("@supabase/supabase-js");
+const express = require('express');
+const axios = require('axios');
+const cors = require('cors');
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: '*'
+}));
+
 app.use(express.json());
 
-/* =========================================
-   SUPABASE
-========================================= */
+/* =========================
+   ENVIRONMENT VARIABLES
+========================= */
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-);
-
-/* =========================================
-   PAYSTACK
-========================================= */
-
-const PAYSTACK_URL = "https://api.paystack.co";
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 
 const FRONTEND_URL =
-  "https://mercyjohn43210-rgb.github.io/Airtime-App/";
+  process.env.FRONTEND_URL ||
+  'https://mercyjohn43210-rgb.github.io/Airtime-App/';
 
-function paystackHeaders() {
-  return {
-    Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-    "Content-Type": "application/json"
-  };
+const supabase = createClient(
+  SUPABASE_URL,
+  SUPABASE_KEY
+);
+
+const PAYSTACK_BASE_URL =
+  'https://api.paystack.co';
+
+/* =========================
+   HELPER FUNCTIONS
+========================= */
+
+function generateReference(prefix = 'JM') {
+  return `${prefix}-${Date.now()}-${crypto
+    .randomBytes(4)
+    .toString('hex')
+    .toUpperCase()}`;
 }
 
-/* =========================================
-   PASSWORD HASHING
-========================================= */
-
-function hashPassword(password) {
-  return new Promise((resolve, reject) => {
-    const salt = crypto.randomBytes(16).toString("hex");
-
-    crypto.scrypt(
-      password,
-      salt,
-      64,
-      (error, derivedKey) => {
-        if (error) {
-          return reject(error);
-        }
-
-        resolve(
-          `${salt}:${derivedKey.toString("hex")}`
-        );
-      }
-    );
-  });
+function normalizeEmail(email) {
+  return String(email || '')
+    .trim()
+    .toLowerCase();
 }
 
-function verifyPassword(password, storedHash) {
-  return new Promise((resolve, reject) => {
-    try {
-      const [salt, key] = storedHash.split(":");
-
-      if (!salt || !key) {
-        return resolve(false);
-      }
-
-      crypto.scrypt(
-        password,
-        salt,
-        64,
-        (error, derivedKey) => {
-          if (error) {
-            return reject(error);
-          }
-
-          const storedKey =
-            Buffer.from(key, "hex");
-
-          const match =
-            storedKey.length === derivedKey.length &&
-            crypto.timingSafeEqual(
-              storedKey,
-              derivedKey
-            );
-
-          resolve(match);
-        }
-      );
-    } catch (error) {
-      reject(error);
-    }
-  });
+function validAmount(amount) {
+  return Number.isFinite(Number(amount)) && Number(amount) > 0;
 }
 
-/* =========================================
+/* =========================
+   DATA PLANS
+========================= */
+
+const DATA_PLANS = [
+
+  /* =====================
+     MTN REGULAR
+  ===================== */
+
+  {
+    id: 'mtn-regular-100',
+    network: 'MTN',
+    category: 'Regular',
+    amount: 100,
+    size: '100MB',
+    validity: '1 day'
+  },
+  {
+    id: 'mtn-regular-200',
+    network: 'MTN',
+    category: 'Regular',
+    amount: 200,
+    size: '250MB',
+    validity: '3 days'
+  },
+  {
+    id: 'mtn-regular-500',
+    network: 'MTN',
+    category: 'Regular',
+    amount: 500,
+    size: '1GB',
+    validity: '7 days'
+  },
+  {
+    id: 'mtn-regular-1000',
+    network: 'MTN',
+    category: 'Regular',
+    amount: 1000,
+    size: '2GB',
+    validity: '30 days'
+  },
+  {
+    id: 'mtn-regular-2000',
+    network: 'MTN',
+    category: 'Regular',
+    amount: 2000,
+    size: '5GB',
+    validity: '30 days'
+  },
+  {
+    id: 'mtn-regular-3000',
+    network: 'MTN',
+    category: 'Regular',
+    amount: 3000,
+    size: '10GB',
+    validity: '30 days'
+  },
+  {
+    id: 'mtn-regular-5000',
+    network: 'MTN',
+    category: 'Regular',
+    amount: 5000,
+    size: '20GB',
+    validity: '30 days'
+  },
+  {
+    id: 'mtn-regular-10000',
+    network: 'MTN',
+    category: 'Regular',
+    amount: 10000,
+    size: '40GB',
+    validity: '30 days'
+  },
+
+  /* =====================
+     AIRTEL REGULAR
+  ===================== */
+
+  {
+    id: 'airtel-regular-100',
+    network: 'Airtel',
+    category: 'Regular',
+    amount: 100,
+    size: '100MB',
+    validity: '1 day'
+  },
+  {
+    id: 'airtel-regular-200',
+    network: 'Airtel',
+    category: 'Regular',
+    amount: 200,
+    size: '250MB',
+    validity: '3 days'
+  },
+  {
+    id: 'airtel-regular-500',
+    network: 'Airtel',
+    category: 'Regular',
+    amount: 500,
+    size: '1GB',
+    validity: '7 days'
+  },
+  {
+    id: 'airtel-regular-1000',
+    network: 'Airtel',
+    category: 'Regular',
+    amount: 1000,
+    size: '2GB',
+    validity: '30 days'
+  },
+  {
+    id: 'airtel-regular-2000',
+    network: 'Airtel',
+    category: 'Regular',
+    amount: 2000,
+    size: '5GB',
+    validity: '30 days'
+  },
+  {
+    id: 'airtel-regular-3000',
+    network: 'Airtel',
+    category: 'Regular',
+    amount: 3000,
+    size: '10GB',
+    validity: '30 days'
+  },
+  {
+    id: 'airtel-regular-5000',
+    network: 'Airtel',
+    category: 'Regular',
+    amount: 5000,
+    size: '20GB',
+    validity: '30 days'
+  },
+  {
+    id: 'airtel-regular-10000',
+    network: 'Airtel',
+    category: 'Regular',
+    amount: 10000,
+    size: '40GB',
+    validity: '30 days'
+  },
+
+  /* =====================
+     GLO REGULAR
+  ===================== */
+
+  {
+    id: 'glo-regular-100',
+    network: 'Glo',
+    category: 'Regular',
+    amount: 100,
+    size: '100MB',
+    validity: '1 day'
+  },
+  {
+    id: 'glo-regular-200',
+    network: 'Glo',
+    category: 'Regular',
+    amount: 200,
+    size: '250MB',
+    validity: '3 days'
+  },
+  {
+    id: 'glo-regular-500',
+    network: 'Glo',
+    category: 'Regular',
+    amount: 500,
+    size: '1GB',
+    validity: '7 days'
+  },
+  {
+    id: 'glo-regular-1000',
+    network: 'Glo',
+    category: 'Regular',
+    amount: 1000,
+    size: '2GB',
+    validity: '30 days'
+  },
+  {
+    id: 'glo-regular-2000',
+    network: 'Glo',
+    category: 'Regular',
+    amount: 2000,
+    size: '5GB',
+    validity: '30 days'
+  },
+  {
+    id: 'glo-regular-3000',
+    network: 'Glo',
+    category: 'Regular',
+    amount: 3000,
+    size: '10GB',
+    validity: '30 days'
+  },
+  {
+    id: 'glo-regular-5000',
+    network: 'Glo',
+    category: 'Regular',
+    amount: 5000,
+    size: '20GB',
+    validity: '30 days'
+  },
+  {
+    id: 'glo-regular-10000',
+    network: 'Glo',
+    category: 'Regular',
+    amount: 10000,
+    size: '40GB',
+    validity: '30 days'
+  },
+
+  /* =====================
+     9MOBILE REGULAR
+  ===================== */
+
+  {
+    id: '9mobile-regular-100',
+    network: '9mobile',
+    category: 'Regular',
+    amount: 100,
+    size: '100MB',
+    validity: '1 day'
+  },
+  {
+    id: '9mobile-regular-200',
+    network: '9mobile',
+    category: 'Regular',
+    amount: 200,
+    size: '250MB',
+    validity: '3 days'
+  },
+  {
+    id: '9mobile-regular-500',
+    network: '9mobile',
+    category: 'Regular',
+    amount: 500,
+    size: '1GB',
+    validity: '7 days'
+  },
+  {
+    id: '9mobile-regular-1000',
+    network: '9mobile',
+    category: 'Regular',
+    amount: 1000,
+    size: '2GB',
+    validity: '30 days'
+  },
+  {
+    id: '9mobile-regular-2000',
+    network: '9mobile',
+    category: 'Regular',
+    amount: 2000,
+    size: '5GB',
+    validity: '30 days'
+  },
+  {
+    id: '9mobile-regular-3000',
+    network: '9mobile',
+    category: 'Regular',
+    amount: 3000,
+    size: '10GB',
+    validity: '30 days'
+  },
+  {
+    id: '9mobile-regular-5000',
+    network: '9mobile',
+    category: 'Regular',
+    amount: 5000,
+    size: '20GB',
+    validity: '30 days'
+  },
+  {
+    id: '9mobile-regular-10000',
+    network: '9mobile',
+    category: 'Regular',
+    amount: 10000,
+    size: '40GB',
+    validity: '30 days'
+  },
+
+  /* =====================
+     MTN GIFT
+  ===================== */
+
+  {
+    id: 'mtn-gift-100',
+    network: 'MTN',
+    category: 'Gift',
+    amount: 100,
+    size: '100MB',
+    validity: '1 day'
+  },
+  {
+    id: 'mtn-gift-200',
+    network: 'MTN',
+    category: 'Gift',
+    amount: 200,
+    size: '250MB',
+    validity: '3 days'
+  },
+  {
+    id: 'mtn-gift-500',
+    network: 'MTN',
+    category: 'Gift',
+    amount: 500,
+    size: '1GB',
+    validity: '7 days'
+  },
+  {
+    id: 'mtn-gift-1000',
+    network: 'MTN',
+    category: 'Gift',
+    amount: 1000,
+    size: '2GB',
+    validity: '30 days'
+  },
+  {
+    id: 'mtn-gift-2000',
+    network: 'MTN',
+    category: 'Gift',
+    amount: 2000,
+    size: '5GB',
+    validity: '30 days'
+  },
+  {
+    id: 'mtn-gift-3000',
+    network: 'MTN',
+    category: 'Gift',
+    amount: 3000,
+    size: '10GB',
+    validity: '30 days'
+  },
+  {
+    id: 'mtn-gift-5000',
+    network: 'MTN',
+    category: 'Gift',
+    amount: 5000,
+    size: '20GB',
+    validity: '30 days'
+  },
+  {
+    id: 'mtn-gift-10000',
+    network: 'MTN',
+    category: 'Gift',
+    amount: 10000,
+    size: '40GB',
+    validity: '30 days'
+  },
+
+  /* =====================
+     MTN CORPORATE
+  ===================== */
+
+  {
+    id: 'mtn-corporate-100',
+    network: 'MTN',
+    category: 'Corporate',
+    amount: 100,
+    size: '100MB',
+    validity: '1 day'
+  },
+  {
+    id: 'mtn-corporate-200',
+    network: 'MTN',
+    category: 'Corporate',
+    amount: 200,
+    size: '250MB',
+    validity: '3 days'
+  },
+  {
+    id: 'mtn-corporate-500',
+    network: 'MTN',
+    category: 'Corporate',
+    amount: 500,
+    size: '1GB',
+    validity: '7 days'
+  },
+  {
+    id: 'mtn-corporate-1000',
+    network: 'MTN',
+    category: 'Corporate',
+    amount: 1000,
+    size: '2GB',
+    validity: '30 days'
+  },
+  {
+    id: 'mtn-corporate-2000',
+    network: 'MTN',
+    category: 'Corporate',
+    amount: 2000,
+    size: '5GB',
+    validity: '30 days'
+  },
+  {
+    id: 'mtn-corporate-3000',
+    network: 'MTN',
+    category: 'Corporate',
+    amount: 3000,
+    size: '10GB',
+    validity: '30 days'
+  },
+  {
+    id: 'mtn-corporate-5000',
+    network: 'MTN',
+    category: 'Corporate',
+    amount: 5000,
+    size: '20GB',
+    validity: '30 days'
+  },
+  {
+    id: 'mtn-corporate-10000',
+    network: 'MTN',
+    category: 'Corporate',
+    amount: 10000,
+    size: '40GB',
+    validity: '30 days'
+  }
+
+];
+
+/* =========================
    HOME
-========================================= */
+========================= */
 
-app.get("/", (req, res) => {
+app.get('/', (req, res) => {
   res.json({
     success: true,
-    message: "Johnmercy Backend is running"
+    message: 'Johnmercy Backend is running'
   });
 });
 
-/* =========================================
+/* =========================
    TEST SUPABASE
-========================================= */
+========================= */
 
-app.get("/test-supabase", async (req, res) => {
+app.get('/test-supabase', async (req, res) => {
   try {
+
     const { data, error } = await supabase
-      .from("users")
-      .select("id,name,email,created_at")
-      .limit(10);
+      .from('users')
+      .select('*')
+      .limit(20);
 
     if (error) {
-      console.error("Supabase error:", error);
-
       return res.status(500).json({
         success: false,
         error: error.message
@@ -133,1393 +512,43 @@ app.get("/test-supabase", async (req, res) => {
       success: true,
       users: data
     });
+
   } catch (error) {
-    console.error(
-      "Supabase connection error:",
-      error
-    );
 
     res.status(500).json({
       success: false,
-      error: "Supabase connection failed"
+      error: error.message
     });
+
   }
 });
 
-/* =========================================
-   GET WALLET
-========================================= */
-
-app.get("/wallet/:email", async (req, res) => {
-  try {
-    const email = String(req.params.email)
-      .trim()
-      .toLowerCase();
-
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        error: "Email is required"
-      });
-    }
-
-    const { data, error } = await supabase
-      .from("wallets")
-      .select(
-        "id,email,balance,created_at,updated_at"
-      )
-      .eq("email", email)
-      .maybeSingle();
-
-    if (error) {
-      console.error(
-        "Wallet lookup error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error: error.message
-      });
-    }
-
-    if (!data) {
-      return res.status(404).json({
-        success: false,
-        error: "Wallet not found"
-      });
-    }
-
-    res.json({
-      success: true,
-      wallet: data
-    });
-  } catch (error) {
-    console.error(
-      "Wallet error:",
-      error
-    );
-
-    res.status(500).json({
-      success: false,
-      error: "Could not get wallet"
-    });
-  }
-});
-
-/* =========================================
-   CREATE WALLET
-========================================= */
-
-app.post("/wallet/create", async (req, res) => {
-  try {
-    const email = String(req.body.email || "")
-      .trim()
-      .toLowerCase();
-
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        error: "Email is required"
-      });
-    }
-
-    const {
-      data: existingWallet,
-      error: findError
-    } = await supabase
-      .from("wallets")
-      .select(
-        "id,email,balance,created_at,updated_at"
-      )
-      .eq("email", email)
-      .maybeSingle();
-
-    if (findError) {
-      console.error(
-        "Wallet search error:",
-        findError
-      );
-
-      return res.status(500).json({
-        success: false,
-        error: findError.message
-      });
-    }
-
-    if (existingWallet) {
-      return res.json({
-        success: true,
-        wallet: existingWallet
-      });
-    }
-
-    const {
-      data,
-      error
-    } = await supabase
-      .from("wallets")
-      .insert([
-        {
-          email,
-          balance: 0
-        }
-      ])
-      .select(
-        "id,email,balance,created_at,updated_at"
-      )
-      .single();
-
-    if (error) {
-      console.error(
-        "Wallet creation error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error: error.message
-      });
-    }
-
-    res.json({
-      success: true,
-      wallet: data
-    });
-  } catch (error) {
-    console.error(
-      "Create wallet error:",
-      error
-    );
-
-    res.status(500).json({
-      success: false,
-      error: "Could not create wallet"
-    });
-  }
-});
-
-/* =========================================
-   SIGN UP
-========================================= */
-
-app.post("/users", async (req, res) => {
-  try {
-    const {
-      name,
-      email,
-      password
-    } = req.body;
-
-    if (!name || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Name, email and password are required"
-      });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Password must be at least 6 characters"
-      });
-    }
-
-    const cleanName =
-      String(name).trim();
-
-    const cleanEmail =
-      String(email)
-        .trim()
-        .toLowerCase();
-
-    const {
-      data: existingUser,
-      error: existingError
-    } = await supabase
-      .from("users")
-      .select("id")
-      .eq("email", cleanEmail)
-      .maybeSingle();
-
-    if (existingError) {
-      console.error(
-        "Existing user check error:",
-        existingError
-      );
-
-      return res.status(500).json({
-        success: false,
-        error: existingError.message
-      });
-    }
-
-    if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        error:
-          "An account with this email already exists."
-      });
-    }
-
-    const passwordHash =
-      await hashPassword(password);
-
-    const {
-      data,
-      error
-    } = await supabase
-      .from("users")
-      .insert([
-        {
-          name: cleanName,
-          email: cleanEmail,
-          password_hash: passwordHash
-        }
-      ])
-      .select(
-        "id,name,email,created_at"
-      )
-      .single();
-
-    if (error) {
-      console.error(
-        "Create user error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error: error.message
-      });
-    }
-
-    /* CREATE USER WALLET */
-
-    const {
-      data: wallet,
-      error: walletError
-    } = await supabase
-      .from("wallets")
-      .insert([
-        {
-          email: cleanEmail,
-          balance: 0
-        }
-      ])
-      .select(
-        "id,email,balance,created_at,updated_at"
-      )
-      .single();
-
-    if (walletError) {
-      console.error(
-        "Wallet creation error after signup:",
-        walletError
-      );
-    }
-
-    res.json({
-      success: true,
-      user: data,
-      wallet: wallet || null
-    });
-  } catch (error) {
-    console.error(
-      "Signup error:",
-      error
-    );
-
-    res.status(500).json({
-      success: false,
-      error: "Could not create account"
-    });
-  }
-});
-
-/* =========================================
-   LOGIN
-========================================= */
-
-app.post("/login", async (req, res) => {
-  try {
-    const {
-      email,
-      password
-    } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Email and password are required"
-      });
-    }
-
-    const cleanEmail =
-      String(email)
-        .trim()
-        .toLowerCase();
-
-    const {
-      data: user,
-      error
-    } = await supabase
-      .from("users")
-      .select(
-        "id,name,email,password_hash,created_at"
-      )
-      .eq("email", cleanEmail)
-      .maybeSingle();
-
-    if (error) {
-      console.error(
-        "Login user lookup error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error: error.message
-      });
-    }
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        error:
-          "Invalid email or password."
-      });
-    }
-
-    const valid =
-      await verifyPassword(
-        password,
-        user.password_hash
-      );
-
-    if (!valid) {
-      return res.status(401).json({
-        success: false,
-        error:
-          "Invalid email or password."
-      });
-    }
-
-    /* GET USER WALLET */
-
-    let {
-      data: wallet,
-      error: walletError
-    } = await supabase
-      .from("wallets")
-      .select(
-        "id,email,balance,created_at,updated_at"
-      )
-      .eq("email", cleanEmail)
-      .maybeSingle();
-
-    if (walletError) {
-      console.error(
-        "Wallet lookup during login:",
-        walletError
-      );
-    }
-
-    /* CREATE WALLET IF IT DOES NOT EXIST */
-
-    if (!wallet) {
-      const result =
-        await supabase
-          .from("wallets")
-          .insert([
-            {
-              email: cleanEmail,
-              balance: 0
-            }
-          ])
-          .select(
-            "id,email,balance,created_at,updated_at"
-          )
-          .single();
-
-      wallet = result.data;
-    }
-
-    res.json({
-      success: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        created_at: user.created_at
-      },
-      wallet: wallet || null
-    });
-  } catch (error) {
-    console.error(
-      "Login error:",
-      error
-    );
-
-    res.status(500).json({
-      success: false,
-      error: "Login failed"
-    });
-  }
-});
-
-/* =========================================
-   INITIALIZE CARD PAYMENT
-========================================= */
-
-app.post(
-  "/initialize-payment",
-  async (req, res) => {
-    try {
-      const {
-        email,
-        amount
-      } = req.body;
-
-      if (
-        !email ||
-        amount === undefined
-      ) {
-        return res.status(400).json({
-          error:
-            "Email and amount are required"
-        });
-      }
-
-      const numericAmount =
-        Number(amount);
-
-      if (
-        !Number.isFinite(numericAmount) ||
-        numericAmount < 100
-      ) {
-        return res.status(400).json({
-          error:
-            "Minimum payment amount is ₦100"
-        });
-      }
-
-      const response =
-        await axios.post(
-          `${PAYSTACK_URL}/transaction/initialize`,
-          {
-            email,
-            amount:
-              Math.round(
-                numericAmount * 100
-              ),
-            currency: "NGN",
-            callback_url:
-              FRONTEND_URL
-          },
-          {
-            headers:
-              paystackHeaders()
-          }
-        );
-
-      res.json(response.data);
-    } catch (error) {
-      console.error(
-        "Paystack initialization error:",
-        error.response?.data ||
-          error.message
-      );
-
-      res.status(500).json({
-        error:
-          error.response?.data?.message ||
-          "Payment initialization failed"
-      });
-    }
-  }
-);
-
-/* =========================================
-   VERIFY CARD PAYMENT
-   AND CREDIT WALLET
-========================================= */
-
-app.get(
-  "/verify-payment/:reference",
-  async (req, res) => {
-    try {
-      const {
-        reference
-      } = req.params;
-
-      const response =
-        await axios.get(
-          `${PAYSTACK_URL}/transaction/verify/${encodeURIComponent(
-            reference
-          )}`,
-          {
-            headers:
-              paystackHeaders()
-          }
-        );
-
-      const payment =
-        response.data;
-
-      if (
-        payment.status &&
-        payment.data &&
-        payment.data.status ===
-          "success"
-      ) {
-        const transaction =
-          payment.data;
-
-        const paymentReference =
-          transaction.reference;
-
-        const email =
-          transaction.customer?.email
-            ?.trim()
-            .toLowerCase();
-
-        const amount =
-          Number(transaction.amount) /
-          100;
-
-        if (
-          !email ||
-          !paymentReference ||
-          !Number.isFinite(amount) ||
-          amount <= 0
-        ) {
-          return res.status(400).json({
-            success: false,
-            error:
-              "Invalid payment information"
-          });
-        }
-
-        /* CHECK DUPLICATE PAYMENT */
-
-        const {
-          data: existingTransaction,
-          error:
-            transactionCheckError
-        } = await supabase
-          .from("wallet_transactions")
-          .select("id,reference")
-          .eq(
-            "reference",
-            paymentReference
-          )
-          .maybeSingle();
-
-        if (transactionCheckError) {
-          console.error(
-            "Transaction check error:",
-            transactionCheckError
-          );
-
-          return res.status(500).json({
-            success: false,
-            error:
-              transactionCheckError.message
-          });
-        }
-
-        if (existingTransaction) {
-          return res.json({
-            success: true,
-            alreadyCredited: true,
-            message:
-              "This payment has already been credited.",
-            reference:
-              paymentReference
-          });
-        }
-
-        /* GET WALLET */
-
-        const {
-          data: wallet,
-          error: walletError
-        } = await supabase
-          .from("wallets")
-          .select(
-            "id,email,balance"
-          )
-          .eq(
-            "email",
-            email
-          )
-          .maybeSingle();
-
-        if (walletError) {
-          console.error(
-            "Wallet lookup error:",
-            walletError
-          );
-
-          return res.status(500).json({
-            success: false,
-            error:
-              walletError.message
-          });
-        }
-
-        if (!wallet) {
-          return res.status(404).json({
-            success: false,
-            error:
-              "Wallet not found"
-          });
-        }
-
-        /* ADD MONEY */
-
-        const currentBalance =
-          Number(wallet.balance) ||
-          0;
-
-        const newBalance =
-          currentBalance +
-          amount;
-
-        const {
-          data: updatedWallet,
-          error: updateError
-        } = await supabase
-          .from("wallets")
-          .update({
-            balance:
-              newBalance,
-            updated_at:
-              new Date().toISOString()
-          })
-          .eq(
-            "id",
-            wallet.id
-          )
-          .select(
-            "id,email,balance,created_at,updated_at"
-          )
-          .single();
-
-        if (updateError) {
-          console.error(
-            "Wallet update error:",
-            updateError
-          );
-
-          return res.status(500).json({
-            success: false,
-            error:
-              updateError.message
-          });
-        }
-
-        /* SAVE TRANSACTION */
-
-        const {
-          error:
-            transactionError
-        } = await supabase
-          .from("wallet_transactions")
-          .insert([
-            {
-              reference:
-                paymentReference,
-              email,
-              type: "credit",
-              amount
-            }
-          ]);
-
-        if (transactionError) {
-          console.error(
-            "Transaction save error:",
-            transactionError
-          );
-        }
-
-        return res.json({
-          success: true,
-          message:
-            "Payment verified and wallet credited.",
-          reference:
-            paymentReference,
-          amount,
-          currency:
-            transaction.currency,
-          email,
-          wallet:
-            updatedWallet
-        });
-      }
-
-      res.json({
-        success: false,
-        message:
-          "Payment has not been completed successfully."
-      });
-    } catch (error) {
-      console.error(
-        "Paystack verification error:",
-        error.response?.data ||
-          error.message
-      );
-
-      res.status(500).json({
-        error:
-          error.response?.data?.message ||
-          "Payment verification failed"
-      });
-    }
-  }
-);
-
-/* =========================================
-   INITIALIZE BANK TRANSFER
-========================================= */
-
-app.post(
-  "/initialize-transfer",
-  async (req, res) => {
-    try {
-      const {
-        email,
-        amount
-      } = req.body;
-
-      if (
-        !email ||
-        amount === undefined
-      ) {
-        return res.status(400).json({
-          error:
-            "Email and amount are required"
-        });
-      }
-
-      const numericAmount =
-        Number(amount);
-
-      if (
-        !Number.isFinite(numericAmount) ||
-        numericAmount < 100
-      ) {
-        return res.status(400).json({
-          error:
-            "Minimum payment amount is ₦100"
-        });
-      }
-
-      const expiresAt =
-        new Date(
-          Date.now() +
-            30 * 60 * 1000
-        ).toISOString();
-
-      const response =
-        await axios.post(
-          `${PAYSTACK_URL}/charge`,
-          {
-            email,
-            amount:
-              Math.round(
-                numericAmount * 100
-              ),
-            currency: "NGN",
-            bank_transfer: {
-              account_expires_at:
-                expiresAt
-            }
-          },
-          {
-            headers:
-              paystackHeaders()
-          }
-        );
-
-      const data =
-        response.data;
-
-      if (
-        data.status &&
-        data.data
-      ) {
-        return res.json({
-          status: true,
-          message:
-            data.message ||
-            "Transfer account created",
-          data: {
-            reference:
-              data.data.reference ||
-              null,
-
-            status:
-              data.data.status ||
-              null,
-
-            amount:
-              data.data.amount
-                ? data.data.amount /
-                  100
-                : numericAmount,
-
-            currency:
-              data.data.currency ||
-              "NGN",
-
-            display_text:
-              data.data.display_text ||
-              null,
-
-            account_number:
-              data.data.bank_transfer
-                ?.account_number ||
-              null,
-
-            bank_name:
-              data.data.bank_transfer
-                ?.bank_name ||
-              null,
-
-            account_name:
-              data.data.bank_transfer
-                ?.account_name ||
-              null,
-
-            expires_at:
-              data.data.bank_transfer
-                ?.account_expires_at ||
-              expiresAt
-          }
-        });
-      }
-
-      res.status(400).json({
-        status: false,
-        error:
-          data.message ||
-          "Transfer payment could not be initialized"
-      });
-    } catch (error) {
-      console.error(
-        "Paystack transfer initialization error:",
-        error.response?.data ||
-          error.message
-      );
-
-      res.status(
-        error.response?.status ||
-          500
-      ).json({
-        status: false,
-        error:
-          error.response?.data?.message ||
-          "Transfer payment initialization failed"
-      });
-    }
-  }
-);
-
-/* =========================================
-   VERIFY BANK TRANSFER
-   AND CREDIT WALLET
-========================================= */
-
-app.get(
-  "/verify-transfer/:reference",
-  async (req, res) => {
-    try {
-      const {
-        reference
-      } = req.params;
-
-      const response =
-        await axios.get(
-          `${PAYSTACK_URL}/transaction/verify/${encodeURIComponent(
-            reference
-          )}`,
-          {
-            headers:
-              paystackHeaders()
-          }
-        );
-
-      const payment =
-        response.data;
-
-      if (
-        payment.status &&
-        payment.data
-      ) {
-        const transaction =
-          payment.data;
-
-        if (
-          transaction.status ===
-          "success"
-        ) {
-          const paymentReference =
-            transaction.reference;
-
-          const email =
-            transaction.customer?.email
-              ?.trim()
-              .toLowerCase();
-
-          const amount =
-            Number(transaction.amount) /
-            100;
-
-          if (
-            !email ||
-            !paymentReference ||
-            !Number.isFinite(amount) ||
-            amount <= 0
-          ) {
-            return res.status(400).json({
-              success: false,
-              error:
-                "Invalid transfer information"
-            });
-          }
-
-          /* CHECK DUPLICATE */
-
-          const {
-            data: existingTransaction,
-            error:
-              transactionCheckError
-          } = await supabase
-            .from("wallet_transactions")
-            .select("id,reference")
-            .eq(
-              "reference",
-              paymentReference
-            )
-            .maybeSingle();
-
-          if (transactionCheckError) {
-            console.error(
-              "Transfer transaction check error:",
-              transactionCheckError
-            );
-
-            return res.status(500).json({
-              success: false,
-              error:
-                transactionCheckError.message
-            });
-          }
-
-          if (existingTransaction) {
-            return res.json({
-              success: true,
-              alreadyCredited: true,
-              message:
-                "This transfer has already been credited.",
-              reference:
-                paymentReference
-            });
-          }
-
-          /* GET WALLET */
-
-          const {
-            data: wallet,
-            error: walletError
-          } = await supabase
-            .from("wallets")
-            .select(
-              "id,email,balance"
-            )
-            .eq(
-              "email",
-              email
-            )
-            .maybeSingle();
-
-          if (walletError) {
-            console.error(
-              "Transfer wallet lookup error:",
-              walletError
-            );
-
-            return res.status(500).json({
-              success: false,
-              error:
-                walletError.message
-            });
-          }
-
-          if (!wallet) {
-            return res.status(404).json({
-              success: false,
-              error:
-                "Wallet not found"
-            });
-          }
-
-          /* ADD MONEY */
-
-          const currentBalance =
-            Number(wallet.balance) ||
-            0;
-
-          const newBalance =
-            currentBalance +
-            amount;
-
-          const {
-            data: updatedWallet,
-            error: updateError
-          } = await supabase
-            .from("wallets")
-            .update({
-              balance:
-                newBalance,
-              updated_at:
-                new Date().toISOString()
-            })
-            .eq(
-              "id",
-              wallet.id
-            )
-            .select(
-              "id,email,balance,created_at,updated_at"
-            )
-            .single();
-
-          if (updateError) {
-            console.error(
-              "Transfer wallet update error:",
-              updateError
-            );
-
-            return res.status(500).json({
-              success: false,
-              error:
-                updateError.message
-            });
-          }
-
-          /* SAVE TRANSACTION */
-
-          const {
-            error:
-              transactionError
-          } = await supabase
-            .from("wallet_transactions")
-            .insert([
-              {
-                reference:
-                  paymentReference,
-                email,
-                type: "credit",
-                amount
-              }
-            ]);
-
-          if (transactionError) {
-            console.error(
-              "Transfer transaction save error:",
-              transactionError
-            );
-          }
-
-          return res.json({
-            success: true,
-            message:
-              "Transfer verified and wallet credited.",
-            reference:
-              paymentReference,
-            amount,
-            currency:
-              transaction.currency,
-            email,
-            wallet:
-              updatedWallet
-          });
-        }
-
-        return res.json({
-          success: false,
-          status:
-            transaction.status,
-          message:
-            "Transfer has not been completed yet."
-        });
-      }
-
-      res.json({
-        success: false,
-        message:
-          "Transfer could not be verified."
-      });
-    } catch (error) {
-      console.error(
-        "Transfer verification error:",
-        error.response?.data ||
-          error.message
-      );
-
-      res.status(500).json({
-        error:
-          error.response?.data?.message ||
-          "Transfer verification failed"
-      });
-    }
-  }
-);
-
-
-/* =========================================
-   DATA PLANS
-========================================= */
-
-const DATA_PLANS = [
-  /* REGULAR MTN */
-
-  {
-    id: "mtn-100",
-    network: "MTN",
-    category: "regular",
-    name: "MTN 100MB",
-    amount: 100,
-    validity: "1 Day",
-    size: "100MB"
-  },
-
-  {
-    id: "mtn-200",
-    network: "MTN",
-    category: "regular",
-    name: "MTN 250MB",
-    amount: 200,
-    validity: "2 Days",
-    size: "250MB"
-  },
-
-  {
-    id: "mtn-500",
-    network: "MTN",
-    category: "regular",
-    name: "MTN 1GB",
-    amount: 500,
-    validity: "7 Days",
-    size: "1GB"
-  },
-
-
-  /* REGULAR AIRTEL */
-
-  {
-    id: "airtel-100",
-    network: "Airtel",
-    category: "regular",
-    name: "Airtel 100MB",
-    amount: 100,
-    validity: "1 Day",
-    size: "100MB"
-  },
-
-  {
-    id: "airtel-200",
-    network: "Airtel",
-    category: "regular",
-    name: "Airtel 250MB",
-    amount: 200,
-    validity: "2 Days",
-    size: "250MB"
-  },
-
-  {
-    id: "airtel-500",
-    network: "Airtel",
-    category: "regular",
-    name: "Airtel 1GB",
-    amount: 500,
-    validity: "7 Days",
-    size: "1GB"
-  },
-
-
-  /* REGULAR GLO */
-
-  {
-    id: "glo-100",
-    network: "Glo",
-    category: "regular",
-    name: "Glo 100MB",
-    amount: 100,
-    validity: "1 Day",
-    size: "100MB"
-  },
-
-  {
-    id: "glo-200",
-    network: "Glo",
-    category: "regular",
-    name: "Glo 250MB",
-    amount: 200,
-    validity: "2 Days",
-    size: "250MB"
-  },
-
-  {
-    id: "glo-500",
-    network: "Glo",
-    category: "regular",
-    name: "Glo 1GB",
-    amount: 500,
-    validity: "7 Days",
-    size: "1GB"
-  },
-
-
-  /* REGULAR 9MOBILE */
-
-  {
-    id: "9mobile-100",
-    network: "9mobile",
-    category: "regular",
-    name: "9mobile 100MB",
-    amount: 100,
-    validity: "1 Day",
-    size: "100MB"
-  },
-
-  {
-    id: "9mobile-200",
-    network: "9mobile",
-    category: "regular",
-    name: "9mobile 250MB",
-    amount: 200,
-    validity: "2 Days",
-    size: "250MB"
-  },
-
-  {
-    id: "9mobile-500",
-    network: "9mobile",
-    category: "regular",
-    name: "9mobile 1GB",
-    amount: 500,
-    validity: "7 Days",
-    size: "1GB"
-  },
-
-
-  /* =========================================
-     GIFT DATA
-  ========================================= */
-
-  {
-    id: "gift-mtn-100",
-    network: "MTN",
-    category: "gift",
-    name: "MTN Gift 100MB",
-    amount: 100,
-    validity: "1 Day",
-    size: "100MB"
-  },
-
-  {
-    id: "gift-mtn-200",
-    network: "MTN",
-    category: "gift",
-    name: "MTN Gift 250MB",
-    amount: 200,
-    validity: "2 Days",
-    size: "250MB"
-  },
-
-  {
-    id: "gift-mtn-500",
-    network: "MTN",
-    category: "gift",
-    name: "MTN Gift 1GB",
-    amount: 500,
-    validity: "7 Days",
-    size: "1GB"
-  },
-
-
-  /* =========================================
-     CORPORATE DATA
-  ========================================= */
-
-  {
-    id: "corporate-mtn-100",
-    network: "MTN",
-    category: "corporate",
-    name: "MTN Corporate 100MB",
-    amount: 100,
-    validity: "1 Day",
-    size: "100MB"
-  },
-
-  {
-    id: "corporate-mtn-200",
-    network: "MTN",
-    category: "corporate",
-    name: "MTN Corporate 250MB",
-    amount: 200,
-    validity: "2 Days",
-    size: "250MB"
-  },
-
-  {
-    id: "corporate-mtn-500",
-    network: "MTN",
-    category: "corporate",
-    name: "MTN Corporate 1GB",
-    amount: 500,
-    validity: "7 Days",
-    size: "1GB"
-  }
-];
-
-
-/* =========================================
+/* =========================
    GET DATA PLANS
-========================================= */
+========================= */
 
-app.get("/data", (req, res) => {
+app.get('/data', (req, res) => {
+
   try {
-    const {
-      network,
-      category
-    } = req.query;
+
+    const network = req.query.network;
+    const category = req.query.category;
 
     let plans = [...DATA_PLANS];
 
     if (network) {
       plans = plans.filter(
-        plan =>
-          plan.network.toLowerCase() ===
-          String(network)
-            .trim()
-            .toLowerCase()
+        p =>
+          p.network.toLowerCase() ===
+          String(network).toLowerCase()
       );
     }
 
     if (category) {
       plans = plans.filter(
-        plan =>
-          plan.category.toLowerCase() ===
-          String(category)
-            .trim()
-            .toLowerCase()
+        p =>
+          p.category.toLowerCase() ===
+          String(category).toLowerCase()
       );
     }
 
@@ -1530,284 +559,893 @@ app.get("/data", (req, res) => {
     });
 
   } catch (error) {
-    console.error(
-      "Data plans error:",
-      error
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+
+  }
+
+});
+
+/* =========================
+   GET WALLET
+========================= */
+
+app.get('/wallet/:email', async (req, res) => {
+
+  try {
+
+    const email = normalizeEmail(req.params.email);
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email is required'
+      });
+    }
+
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    if (!data) {
+      return res.json({
+        success: true,
+        wallet: {
+          email,
+          balance: 0
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      wallet: data
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+
+  }
+
+});
+
+/* =========================
+   CREATE WALLET
+========================= */
+
+app.post('/wallet/create', async (req, res) => {
+
+  try {
+
+    const email = normalizeEmail(req.body.email);
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email is required'
+      });
+    }
+
+    const { data: existing, error: existingError } =
+      await supabase
+        .from('wallets')
+        .select('*')
+        .eq('email', email)
+        .maybeSingle();
+
+    if (existingError) {
+      return res.status(500).json({
+        success: false,
+        error: existingError.message
+      });
+    }
+
+    if (existing) {
+      return res.json({
+        success: true,
+        wallet: existing
+      });
+    }
+
+    const { data, error } = await supabase
+      .from('wallets')
+      .insert([
+        {
+          email,
+          balance: 0
+        }
+      ])
+      .select()
+      .single();
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    res.json({
+      success: true,
+      wallet: data
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+
+  }
+
+});
+
+/* =========================
+   SIGN UP
+========================= */
+
+app.post('/users', async (req, res) => {
+
+  try {
+
+    const name = String(req.body.name || '').trim();
+    const email = normalizeEmail(req.body.email);
+    const password = String(req.body.password || '');
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Name, email and password are required'
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password must be at least 6 characters'
+      });
+    }
+
+    const { data: existing, error: existingError } =
+      await supabase
+        .from('users')
+        .select('id,email')
+        .eq('email', email)
+        .maybeSingle();
+
+    if (existingError) {
+      return res.status(500).json({
+        success: false,
+        error: existingError.message
+      });
+    }
+
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        error: 'Email already exists'
+      });
+    }
+
+    const password_hash = await bcrypt.hash(
+      password,
+      10
     );
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .insert([
+        {
+          name,
+          email,
+          password_hash
+        }
+      ])
+      .select('id,name,email,created_at')
+      .single();
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    await supabase
+      .from('wallets')
+      .insert([
+        {
+          email,
+          balance: 0
+        }
+      ]);
+
+    res.json({
+      success: true,
+      user
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+
+  }
+
+});
+
+/* =========================
+   LOGIN
+========================= */
+
+app.post('/login', async (req, res) => {
+
+  try {
+
+    const email = normalizeEmail(req.body.email);
+    const password = String(req.body.password || '');
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email and password are required'
+      });
+    }
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid email or password'
+      });
+    }
+
+    const passwordOk = await bcrypt.compare(
+      password,
+      user.password_hash
+    );
+
+    if (!passwordOk) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid email or password'
+      });
+    }
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email
+      }
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+
+  }
+
+});
+
+/* =========================
+   INITIALIZE PAYSTACK PAYMENT
+========================= */
+
+app.post('/initialize-payment', async (req, res) => {
+
+  try {
+
+    const email = normalizeEmail(req.body.email);
+    const amount = Number(req.body.amount);
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email is required'
+      });
+    }
+
+    if (!validAmount(amount)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid amount'
+      });
+    }
+
+    if (amount < 100) {
+      return res.status(400).json({
+        success: false,
+        error: 'Minimum funding amount is ₦100'
+      });
+    }
+
+    if (!PAYSTACK_SECRET_KEY) {
+      return res.status(500).json({
+        success: false,
+        error: 'Paystack secret key is not configured'
+      });
+    }
+
+    const reference = generateReference('FUND');
+
+    const response = await axios.post(
+      `${PAYSTACK_BASE_URL}/transaction/initialize`,
+      {
+        email,
+        amount: Math.round(amount * 100),
+        reference,
+        callback_url: FRONTEND_URL
+      },
+      {
+        headers: {
+          Authorization:
+            `Bearer ${PAYSTACK_SECRET_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    res.json({
+      success: true,
+      reference,
+      authorization_url:
+        response.data.data.authorization_url,
+      access_code:
+        response.data.data.access_code
+    });
+
+  } catch (error) {
 
     res.status(500).json({
       success: false,
       error:
-        "Could not load data plans"
+        error.response?.data?.message ||
+        error.message
     });
+
   }
+
 });
 
+/* =========================
+   VERIFY PAYSTACK PAYMENT
+========================= */
 
-/* =========================================
-   PURCHASE DATA
-========================================= */
+app.get('/verify-payment/:reference', async (req, res) => {
 
-app.post(
-  "/purchase-data",
-  async (req, res) => {
-    try {
-      const {
-        email,
-        phone,
-        planId
-      } = req.body;
+  try {
 
-      if (
-        !email ||
-        !phone ||
-        !planId
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Email, phone number and plan are required"
-        });
+    const reference = req.params.reference;
+
+    if (!PAYSTACK_SECRET_KEY) {
+      return res.status(500).json({
+        success: false,
+        error: 'Paystack secret key is not configured'
+      });
+    }
+
+    const response = await axios.get(
+      `${PAYSTACK_BASE_URL}/transaction/verify/${reference}`,
+      {
+        headers: {
+          Authorization:
+            `Bearer ${PAYSTACK_SECRET_KEY}`
+        }
       }
+    );
 
-      const cleanEmail =
-        String(email)
-          .trim()
-          .toLowerCase();
+    const payment = response.data.data;
 
-      const cleanPhone =
-        String(phone).trim();
+    if (payment.status !== 'success') {
+      return res.json({
+        success: false,
+        status: payment.status,
+        message: 'Payment not successful'
+      });
+    }
 
-      const plan =
-        DATA_PLANS.find(
-          item =>
-            item.id === planId
-        );
+    const email = normalizeEmail(
+      payment.customer?.email
+    );
 
-      if (!plan) {
-        return res.status(404).json({
-          success: false,
-          error:
-            "Data plan not found"
-        });
-      }
+    const amount =
+      Number(payment.amount || 0) / 100;
 
-      /* GET WALLET */
+    if (!email || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid payment information'
+      });
+    }
 
-      const {
-        data: wallet,
-        error: walletError
-      } = await supabase
-        .from("wallets")
-        .select(
-          "id,email,balance"
-        )
-        .eq(
-          "email",
-          cleanEmail
-        )
+    const { data: wallet, error: walletError } =
+      await supabase
+        .from('wallets')
+        .select('*')
+        .eq('email', email)
         .maybeSingle();
 
-      if (walletError) {
-        console.error(
-          "Data wallet lookup error:",
-          walletError
-        );
+    if (walletError) {
+      return res.status(500).json({
+        success: false,
+        error: walletError.message
+      });
+    }
 
+    let newBalance;
+
+    if (!wallet) {
+
+      const { data: createdWallet, error } =
+        await supabase
+          .from('wallets')
+          .insert([
+            {
+              email,
+              balance: amount
+            }
+          ])
+          .select()
+          .single();
+
+      if (error) {
         return res.status(500).json({
           success: false,
-          error:
-            walletError.message
+          error: error.message
         });
       }
 
-      if (!wallet) {
-        return res.status(404).json({
-          success: false,
-          error:
-            "Wallet not found"
-        });
-      }
+      newBalance = Number(
+        createdWallet.balance
+      );
 
-      const balance =
-        Number(wallet.balance) || 0;
+    } else {
 
-      /* CHECK BALANCE */
+      newBalance =
+        Number(wallet.balance || 0) + amount;
 
-      if (
-        balance < plan.amount
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Insufficient wallet balance",
-          balance,
-          required:
-            plan.amount
-        });
-      }
-
-      /*
-        IMPORTANT:
-
-        The actual network delivery
-        will be connected to a VTU
-        provider API separately.
-      */
-
-      const newBalance =
-        balance - plan.amount;
-
-      /* DEDUCT WALLET */
-
-      const {
-        data: updatedWallet,
-        error: updateError
-      } = await supabase
-        .from("wallets")
+      const { error } = await supabase
+        .from('wallets')
         .update({
-          balance:
-            newBalance,
-          updated_at:
-            new Date().toISOString()
+          balance: newBalance,
+          updated_at: new Date().toISOString()
         })
-        .eq(
-          "id",
-          wallet.id
-        )
-        .select(
-          "id,email,balance,created_at,updated_at"
-        )
-        .single();
+        .eq('email', email);
 
-      if (updateError) {
-        console.error(
-          "Data wallet update error:",
-          updateError
-        );
-
+      if (error) {
         return res.status(500).json({
           success: false,
-          error:
-            updateError.message
+          error: error.message
         });
       }
 
-      /* CREATE REFERENCE */
+    }
 
-      const reference =
-        `DATA-${Date.now()}-${crypto
-          .randomBytes(4)
-          .toString("hex")}`;
+    try {
 
-      /* SAVE TRANSACTION */
-
-      const {
-        error:
-          transactionError
-      } = await supabase
-        .from("wallet_transactions")
+      await supabase
+        .from('wallet_transactions')
         .insert([
           {
             reference,
-            email: cleanEmail,
-            type: "debit",
-            amount:
-              plan.amount
+            email,
+            type: 'credit',
+            amount
           }
         ]);
 
-      if (transactionError) {
-        console.error(
-          "Data transaction save error:",
-          transactionError
-        );
-      }
-
-      res.json({
-        success: true,
-        message:
-          "Data purchase processed successfully.",
-        reference,
-        phone:
-          cleanPhone,
-        plan,
-        amount:
-          plan.amount,
-        wallet:
-          updatedWallet,
-        deliveryStatus:
-          "pending_provider"
-      });
-
-    } catch (error) {
-      console.error(
-        "Purchase data error:",
-        error
-      );
-
-      res.status(500).json({
-        success: false,
-        error:
-          "Data purchase failed"
-      });
-    }
-  }
-);
-
-
-/* =========================================
-   PAYSTACK WEBHOOK
-========================================= */
-
-app.post(
-  "/paystack-webhook",
-  (req, res) => {
-    try {
-      const event =
-        req.body;
+    } catch (transactionError) {
 
       console.log(
-        "Paystack webhook received:",
-        event.event
+        'Transaction save error:',
+        transactionError.message
       );
 
-      if (
-        event.event ===
-        "charge.success"
-      ) {
-        console.log(
-          "Successful Paystack transaction:",
-          event.data?.reference
-        );
+    }
+
+    res.json({
+      success: true,
+      status: 'success',
+      amount,
+      wallet: {
+        email,
+        balance: newBalance
       }
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      success: false,
+      error:
+        error.response?.data?.message ||
+        error.message
+    });
+
+  }
+
+});
+
+/* =========================
+   INITIALIZE BANK TRANSFER
+========================= */
+
+app.post('/initialize-transfer', async (req, res) => {
+
+  try {
+
+    const email = normalizeEmail(req.body.email);
+    const amount = Number(req.body.amount);
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email is required'
+      });
+    }
+
+    if (!validAmount(amount)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid amount'
+      });
+    }
+
+    if (!PAYSTACK_SECRET_KEY) {
+      return res.status(500).json({
+        success: false,
+        error: 'Paystack secret key is not configured'
+      });
+    }
+
+    const reference = generateReference('TRF');
+
+    const response = await axios.post(
+      `${PAYSTACK_BASE_URL}/charge`,
+      {
+        email,
+        amount: Math.round(amount * 100),
+        reference,
+        bank_transfer: {}
+      },
+      {
+        headers: {
+          Authorization:
+            `Bearer ${PAYSTACK_SECRET_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    res.json({
+      success: true,
+      reference,
+      data: response.data.data
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      success: false,
+      error:
+        error.response?.data?.message ||
+        error.message
+    });
+
+  }
+
+});
+
+/* =========================
+   VERIFY BANK TRANSFER
+========================= */
+
+app.get('/verify-transfer/:reference', async (req, res) => {
+
+  try {
+
+    const reference = req.params.reference;
+
+    if (!PAYSTACK_SECRET_KEY) {
+      return res.status(500).json({
+        success: false,
+        error: 'Paystack secret key is not configured'
+      });
+    }
+
+    const response = await axios.get(
+      `${PAYSTACK_BASE_URL}/transaction/verify/${reference}`,
+      {
+        headers: {
+          Authorization:
+            `Bearer ${PAYSTACK_SECRET_KEY}`
+        }
+      }
+    );
+
+    const payment = response.data.data;
+
+    res.json({
+      success: true,
+      status: payment.status,
+      reference: payment.reference,
+      amount:
+        Number(payment.amount || 0) / 100,
+      customer:
+        payment.customer || null
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      success: false,
+      error:
+        error.response?.data?.message ||
+        error.message
+    });
+
+  }
+
+});
+
+/* =========================
+   PURCHASE DATA
+========================= */
+
+app.post('/purchase-data', async (req, res) => {
+
+  try {
+
+    const email = normalizeEmail(req.body.email);
+    const phone = String(req.body.phone || '').trim();
+    const planId = String(req.body.planId || '').trim();
+
+    if (!email || !phone || !planId) {
+      return res.status(400).json({
+        success: false,
+        error:
+          'Email, phone number and plan are required'
+      });
+    }
+
+    const plan = DATA_PLANS.find(
+      p => p.id === planId
+    );
+
+    if (!plan) {
+      return res.status(404).json({
+        success: false,
+        error: 'Data plan not found'
+      });
+    }
+
+    const { data: wallet, error: walletError } =
+      await supabase
+        .from('wallets')
+        .select('*')
+        .eq('email', email)
+        .maybeSingle();
+
+    if (walletError) {
+      return res.status(500).json({
+        success: false,
+        error: walletError.message
+      });
+    }
+
+    if (!wallet) {
+      return res.status(404).json({
+        success: false,
+        error: 'Wallet not found'
+      });
+    }
+
+    const balance =
+      Number(wallet.balance || 0);
+
+    if (balance < plan.amount) {
+      return res.status(400).json({
+        success: false,
+        error: 'Insufficient wallet balance',
+        balance,
+        required: plan.amount
+      });
+    }
+
+    const newBalance =
+      balance - plan.amount;
+
+    const reference =
+      generateReference('DATA');
+
+    const { error: updateError } =
+      await supabase
+        .from('wallets')
+        .update({
+          balance: newBalance,
+          updated_at:
+            new Date().toISOString()
+        })
+        .eq('email', email);
+
+    if (updateError) {
+      return res.status(500).json({
+        success: false,
+        error: updateError.message
+      });
+    }
+
+    try {
+
+      await supabase
+        .from('wallet_transactions')
+        .insert([
+          {
+            reference,
+            email,
+            type: 'data_purchase',
+            amount: plan.amount
+          }
+        ]);
+
+    } catch (transactionError) {
+
+      console.log(
+        'Transaction save error:',
+        transactionError.message
+      );
+
+    }
+
+    res.json({
+      success: true,
+
+      message:
+        'Data purchase accepted',
+
+      reference,
+
+      phone,
+
+      plan,
+
+      wallet: {
+        email,
+        balance: newBalance
+      },
+
+      deliveryStatus:
+        'pending_provider'
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+
+  }
+
+});
+
+/* =========================
+   PAYSTACK WEBHOOK
+========================= */
+
+app.post(
+  '/paystack-webhook',
+  express.raw({
+    type: 'application/json'
+  }),
+  async (req, res) => {
+
+    try {
+
+      if (!PAYSTACK_SECRET_KEY) {
+        return res.sendStatus(200);
+      }
+
+      const signature =
+        req.headers['x-paystack-signature'];
+
+      const hash =
+        crypto
+          .createHmac(
+            'sha512',
+            PAYSTACK_SECRET_KEY
+          )
+          .update(req.body)
+          .digest('hex');
+
+      if (signature !== hash) {
+        return res.sendStatus(401);
+      }
+
+      const event =
+        JSON.parse(req.body.toString());
+
+      console.log(
+        'Paystack webhook:',
+        event.event
+      );
 
       res.sendStatus(200);
 
     } catch (error) {
-      console.error(
-        "Webhook error:",
+
+      console.log(
+        'Webhook error:',
         error.message
       );
 
       res.sendStatus(200);
     }
+
   }
 );
 
+/* =========================
+   404 HANDLER
+========================= */
 
-/* =========================================
-   SERVER
-========================================= */
+app.use((req, res) => {
+
+  res.status(404).json({
+    success: false,
+    error: 'Route not found',
+    path: req.path
+  });
+
+});
+
+/* =========================
+   START SERVER
+========================= */
 
 const PORT =
   process.env.PORT || 3000;
 
-app.listen(
-  PORT,
-  () => {
-    console.log(
-      `Johnmercy Backend running on port ${PORT}`
-    );
-  }
-);
+app.listen(PORT, () => {
+
+  console.log(
+    `Johnmercy Backend running on port ${PORT}`
+  );
+
+});
